@@ -4,6 +4,10 @@
 #include <sys/time.h>
 #include <vector>
 #include <sstream>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <cstdlib>
 
 using namespace std;
 struct Process {
@@ -25,7 +29,7 @@ inline uint64_t get_current_time_ms() {
     return static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 }
 
-inline void parse_command(const std::string& command, std::vector<char*>& argv, std::vector<std::string>& tokens) {
+inline void parse_command(const string& command, vector<char*>& argv, vector<string>& tokens) {
     istringstream iss(command);
     string tok;
     while (iss >> tok) tokens.push_back(tok);
@@ -33,3 +37,31 @@ inline void parse_command(const std::string& command, std::vector<char*>& argv, 
     for (auto& s : tokens) argv.push_back(const_cast<char*>(s.c_str()));
     argv.push_back(nullptr);
 }
+
+inline void FCFS(vector<Process>& processes) {
+    uint64_t scheduler_start = get_current_time_ms();
+    for (auto& proc : processes) {
+        vector<string> tokens;
+        vector<char*> argv;
+        parse_command(proc.command, argv, tokens);
+
+        proc.start_time = get_current_time_ms() - scheduler_start;
+        pid_t pid = fork();
+        if (pid == 0) {
+            execvp(argv[0], argv.data());
+            exit(1);
+        } else if (pid > 0) {
+            proc.process_id = pid;
+            proc.started = true;
+            int status;
+            waitpid(pid, &status, 0);
+            proc.completion_time = get_current_time_ms() - scheduler_start;
+            proc.finished = WIFEXITED(status) && (WEXITSTATUS(status) == 0);
+            proc.error = !proc.finished;
+            proc.turnaround_time = proc.completion_time - proc.start_time;
+            proc.waiting_time = proc.turnaround_time;
+            proc.response_time = proc.start_time;
+        }
+    }
+}
+
