@@ -8,7 +8,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <cstdlib>
-
+#include <fstream>
+#include <iostream>
 using namespace std;
 struct Process {
     string command;
@@ -36,6 +37,21 @@ inline void parse_command(const string& command, vector<char*>& argv, vector<str
     argv.clear();
     for (auto& s : tokens) argv.push_back(const_cast<char*>(s.c_str()));
     argv.push_back(nullptr);
+}
+
+inline void write_results_to_csv(const vector<Process>& processes, const string& filename) {
+    ofstream fp(filename);
+    if (!fp) { cerr << "Could not open file " << filename << "\n"; return; }
+    fp << "Command,Finished,Error,CompletionTime,Turnaround,Waiting,Response\n";
+    for (const auto& proc : processes) {
+        fp << "\"" << proc.command << "\","
+           << (proc.finished ? "Yes" : "No") << ","
+           << (proc.error ? "Yes" : "No") << ","
+           << proc.completion_time << ","
+           << proc.turnaround_time << ","
+           << proc.waiting_time << ","
+           << proc.response_time << "\n";
+    }
 }
 
 inline void FCFS(vector<Process>& processes) {
