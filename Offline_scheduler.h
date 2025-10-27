@@ -10,6 +10,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <queue>
+#include <thread>
+#include <signal.h>
 using namespace std;
 struct Process {
     string command;
@@ -80,4 +83,37 @@ inline void FCFS(vector<Process>& processes) {
         }
     }
 }
+
+
+void RoundRobin(std::vector<Process>& processes, int quantum_ms) {
+    auto scheduler_start = get_current_time_ms();
+    std::vector<std::uint64_t> total_cpu_times(processes.size(), 0);
+    std::queue<int> ready_queue; int completed = 0;
+    for(int i=0;i<processes.size();++i) ready_queue.push(i);
+    while(completed < processes.size()) {
+        if(ready_queue.empty()) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); continue; }
+        int idx = ready_queue.front(); ready_queue.pop(); pid_t pid = processes[idx].process_id;
+        auto start_t = get_current_time_ms();
+        if (pid == -1) {
+            processes[idx].started = true; processes[idx].response_time = start_t - scheduler_start;
+            std::vector<std::string> tokens; std::vector<char*> argv; parse_command(processes[idx].command, argv, tokens);
+            pid = fork();
+            if (pid==0) { execvp(argv[0], argv.data()); exit(1); }
+            processes[idx].process_id = pid;
+        } else { kill(pid, SIGCONT); }
+        std::this_thread::sleep_for(std::chrono::milliseconds(quantum_ms));
+        int status; int wait_ret = waitpid(pid, &status, WNOHANG); auto end_t = get_current_time_ms();
+        total_cpu_times[idx] += (end_t - start_t);
+        if (wait_ret == pid) {
+            completed++; processes[idx].completion_time = end_t - scheduler_start;
+            processes[idx].finished = WIFEXITED(status) && (WEXITSTATUS(status)==0); processes[idx].error = !processes[idx].finished;
+        } else { kill(pid, SIGSTOP); ready_queue.push(idx); }
+    }
+    for(int i=0;i<processes.size();++i) {
+        processes[i].turnaround_time = processes[i].completion_time;
+        processes[i].waiting_time = processes[i].turnaround_time - total_cpu_times[i];
+    }
+    write_results_to_csv(processes, "result_offline_RR.csv");
+}
+
 
