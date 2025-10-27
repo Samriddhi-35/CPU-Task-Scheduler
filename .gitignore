@@ -1,0 +1,11 @@
+*.csv
+*.o
+*.out
+*.exe
+main
+demo
+result_offline_FCFS.csv
+result_offline_RR.csv
+result_offline_MLFQ.csv
+.vscode/
+.DS_Store

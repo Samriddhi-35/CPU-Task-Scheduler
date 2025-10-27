@@ -4,15 +4,30 @@
 #include <iostream>
 using namespace std;
 
+void reset_process_state(std::vector<Process> &processes) {
+    for(auto &p : processes){
+        p.finished = false;
+        p.error = false;
+        p.start_time = 0;
+        p.completion_time = 0;
+        p.turnaround_time = 0;
+        p.waiting_time = 0;
+        p.response_time = 0;
+        p.started = false;
+        p.process_id = -1;
+    }
+}
+
 int main() {
     std::vector<Process> processes = {
         {"ls"},
-        {"echo Hello World"},
-        {"sleep 1"}
+        {"echo Hello"}
     };
 
+    reset_process_state(processes);
     FCFS(processes);
-    write_results_to_csv(processes, "result_offline_FCFS.csv");
-    cout << "Results written to result_offline_FCFS.csv"<< endl;
+
+    reset_process_state(processes);
+    RoundRobin(processes, 500); // Time quantum of 500 ms
     return 0;
 }
