@@ -13,6 +13,7 @@
 #include <queue>
 #include <thread>
 #include <signal.h>
+#include <queue>
 using namespace std;
 struct Process
 {
@@ -107,11 +108,11 @@ inline void FCFS(vector<Process> &processes)
     write_results_to_csv(processes, "result_offline_FCFS.csv");
 }
 
-void RoundRobin(std::vector<Process> &processes, int quantum_ms)
+void RoundRobin(vector<Process> &processes, int quantum_ms)
 {
     auto scheduler_start = get_current_time_ms();
-    std::vector<std::uint64_t> total_cpu_times(processes.size(), 0);
-    std::queue<int> ready_queue;
+    vector<uint64_t> total_cpu_times(processes.size(), 0);
+    queue<int> ready_queue;
     int completed = 0;
     for (int i = 0; i < processes.size(); ++i)
         ready_queue.push(i);
@@ -120,7 +121,7 @@ void RoundRobin(std::vector<Process> &processes, int quantum_ms)
     {
         if (ready_queue.empty())
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            this_thread::sleep_for(chrono::milliseconds(1));
             continue;
         }
         int idx = ready_queue.front();
@@ -131,8 +132,8 @@ void RoundRobin(std::vector<Process> &processes, int quantum_ms)
         {
             processes[idx].started = true;
             processes[idx].response_time = start_t - scheduler_start;
-            std::vector<std::string> tokens;
-            std::vector<char *> argv;
+            vector<string> tokens;
+            vector<char *> argv;
             parse_command(processes[idx].command, argv, tokens);
             pid = fork();
             if (pid == 0)
@@ -146,7 +147,7 @@ void RoundRobin(std::vector<Process> &processes, int quantum_ms)
         {
             kill(pid, SIGCONT);
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(quantum_ms));
+        this_thread::sleep_for(chrono::milliseconds(quantum_ms));
         int status;
         int wait_ret = waitpid(pid, &status, WNOHANG);
         auto end_t = get_current_time_ms();
@@ -171,4 +172,77 @@ void RoundRobin(std::vector<Process> &processes, int quantum_ms)
         processes[i].waiting_time = processes[i].turnaround_time - total_cpu_times[i];
     }
     write_results_to_csv(processes, "result_offline_RR.csv");
+}
+
+void MultiLevelFeedbackQueue(vector<Process>& processes, int quantum0, int quantum1, int quantum2, int boostTime) {
+    uint64_t scheduler_start = get_current_time_ms();
+    uint64_t last_boost_time = scheduler_start;
+    int completed_count = 0;
+    vector<SchedulerProcess> sp;
+    for (auto& proc : processes)
+        sp.push_back(SchedulerProcess{ &proc, 0, 0, -1 });
+
+    queue<int> q0, q1, q2;
+    int quantums[] = {quantum0, quantum1, quantum2};
+    for (int i = 0; i < processes.size(); ++i) q0.push(i);
+
+    while (completed_count < processes.size()) {
+        uint64_t now = get_current_time_ms();
+        if (now - last_boost_time > (uint64_t)boostTime) {
+            while (!q1.empty()) { int idx = q1.front(); q1.pop(); sp[idx].current_queue = 0; q0.push(idx); }
+            while (!q2.empty()) { int idx = q2.front(); q2.pop(); sp[idx].current_queue = 0; q0.push(idx); }
+            last_boost_time = now;
+        }
+
+        int idx = -1, active_queue = -1;
+        if (!q0.empty()) { idx = q0.front(); q0.pop(); active_queue = 0; }
+        else if (!q1.empty()) { idx = q1.front(); q1.pop(); active_queue = 1; }
+        else if (!q2.empty()) { idx = q2.front(); q2.pop(); active_queue = 2; }
+        else { this_thread::sleep_for(chrono::milliseconds(1)); continue; }
+
+        uint64_t start_t = get_current_time_ms();
+        pid_t pid = sp[idx].pid;
+        if (pid == -1) {
+            sp[idx].p->started = true;
+            sp[idx].p->response_time = start_t - scheduler_start;
+            vector<string> tokens; vector<char*> argv;
+            parse_command(sp[idx].p->command, argv, tokens);
+            pid = fork();
+            if (pid == 0) { execvp(argv[0], argv.data()); exit(1); }
+            sp[idx].pid = pid;
+        } else {
+            kill(pid, SIGCONT);
+        }
+
+        uint64_t slice_deadline = start_t + quantums[active_queue];
+        uint64_t actual_end_t = start_t;
+        bool finished_within_quantum = false;
+        int status;
+        while ((actual_end_t = get_current_time_ms()) < slice_deadline) {
+            int wait_ret = waitpid(pid, &status, WNOHANG);
+            if (wait_ret == pid) { finished_within_quantum = true; break; }
+            this_thread::sleep_for(chrono::milliseconds(1));
+        }
+        if (!finished_within_quantum)
+            actual_end_t = get_current_time_ms();
+        uint64_t burst = actual_end_t - start_t;
+        sp[idx].total_cpu_time += burst;
+
+        if (finished_within_quantum) {
+            completed_count++;
+            sp[idx].p->completion_time = actual_end_t - scheduler_start;
+            sp[idx].p->finished = WIFEXITED(status) && (WEXITSTATUS(status)==0);
+            sp[idx].p->error = !sp[idx].p->finished;
+        } else {
+            kill(pid, SIGSTOP);
+            if (active_queue < 2) sp[idx].current_queue++;
+            if (sp[idx].current_queue == 1) q1.push(idx);
+            else                          q2.push(idx);
+        }
+    }
+    for (auto& s : sp) {
+        s.p->turnaround_time = s.p->completion_time;
+        s.p->waiting_time = s.p->turnaround_time - s.total_cpu_time;
+    }
+    write_results_to_csv(processes, "result_offline_MLFQ.csv");
 }
