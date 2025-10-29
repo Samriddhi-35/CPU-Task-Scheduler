@@ -29,5 +29,9 @@ int main() {
 
     reset_process_state(processes);
     RoundRobin(processes, 500); // Time quantum of 500 ms
+
+    reset_process_state(processes);
+    MultiLevelFeedbackQueue(processes, 500, 1000, 2000, 4000);
+    cout << "All scheduling algorithms executed.\n";
     return 0;
 }
