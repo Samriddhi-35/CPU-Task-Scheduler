@@ -67,6 +67,12 @@ inline void write_results_to_csv(const vector<Process> &processes, const string 
            << proc.response_time << "\n";
     }
 }
+struct SchedulerProcess {
+    Process* p;
+    int current_queue = 0;
+    uint64_t total_cpu_time = 0;
+    pid_t pid = -1;
+};
 
 inline void FCFS(vector<Process> &processes)
 {
