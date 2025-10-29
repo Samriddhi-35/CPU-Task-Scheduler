@@ -63,3 +63,16 @@ inline void set_stdin_nonblocking(bool enable) {
     else flags &= ~O_NONBLOCK;
     fcntl(STDIN_FILENO, F_SETFL, flags);
 }
+
+inline int find_history_index(const std::vector<CmdHistory>& ch, const std::string& cmd) {
+    for (int i = 0; i < (int)ch.size(); ++i) if (ch[i].cmd == cmd) return i;
+    return -1;
+}
+inline int ensure_history_index(std::vector<CmdHistory>& ch, const std::string& cmd) {
+    int idx = find_history_index(ch, cmd);
+    if (idx >= 0) return idx;
+    CmdHistory new_history;
+    new_history.cmd = cmd;
+    ch.push_back(new_history);
+    return ch.size() - 1;
+}
