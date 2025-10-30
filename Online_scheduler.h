@@ -15,10 +15,19 @@
 #include <csignal>
 #include <cstring>
 #include <cerrno>
+#include <functional>
+#include <algorithm>
 
 using namespace std;
 
-constexpr int MAX_HISTORY = 50;
+#define MAX_PROCS 200
+#define MAX_CMD_LEN 1000
+#define MAX_HISTORY 50
+#define POLL_SLEEP_MS 20   // ms poll granularity
+#define MAX_UNIQUE_CMDS 200
+
+static queue<int> q0arr, q1arr, q2arr;
+
 struct CmdHistory
 {
     string cmd;
@@ -41,18 +50,17 @@ struct OnlineProcess
 
 static struct timespec program_start_ts;
 
-static void set_program_start_time(void)
+static void set_program_start_time()
 {
     clock_gettime(CLOCK_MONOTONIC, &program_start_ts);
 }
 
-static uint64_t now_ms()
-{
+static uint64_t now_ms() {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    int64_t sec_diff = static_cast<int64_t>(t.tv_sec) - static_cast<int64_t>(program_start_ts.tv_sec);
-    int64_t ns_diff = static_cast<int64_t>(t.tv_nsec) - static_cast<int64_t>(program_start_ts.tv_nsec);
-    return static_cast<uint64_t>(sec_diff * 1000LL + ns_diff / 1000000LL);
+    int64_t sec_diff = (int64_t)t.tv_sec - (int64_t)program_start_ts.tv_sec;
+    int64_t ns_diff = (int64_t)t.tv_nsec - (int64_t)program_start_ts.tv_nsec;
+    return (uint64_t)(sec_diff * 1000LL + ns_diff / 1000000LL);
 }
 
 static void record_burst_to_history(vector<CmdHistory> &cmd_history, int hist_idx, double burst_ms)
@@ -397,55 +405,75 @@ static void print_context_switch(const string &cmd, uint64_t start_ms, uint64_t 
     cout.flush();
 }
 
-static void promote_all_to_q0(vector<int> &q0arr,
-                              vector<int> &q1arr,
-                              vector<int> &q2arr,
+static void promote_all_to_q0(queue<int> &q0arr,
+                              queue<int> &q1arr,
+                              queue<int> &q2arr,
                               int max_procs,
                               const function<bool(int)> &is_queued)
 {
     vector<int> leftover_q1;
-    for (int idx : q1arr)
+    while (!q1arr.empty())
     {
+        int idx = q1arr.front();
+        q1arr.pop();
         if (!is_queued(idx))
             continue;
         if ((int)q0arr.size() < max_procs)
-            q0arr.push_back(idx);
-         else
-    {
-        leftover_q1.push_back(idx);  // Could not promote, keep in q1
+            q0arr.push(idx);
+        else
+        {
+            leftover_q1.push_back(idx);  // Could not promote, keep in q1
+        }
     }
-    }
-    q1arr =move(leftover_q1);
+    queue<int> temp;
+    for (int idx : leftover_q1)
+        temp.push(idx);
+    q1arr.swap(temp);
 
     // Promote all from q2 to q0
     vector<int> leftover_q2;
-    for (int idx : q2arr)
+    while (!q2arr.empty())
     {
+        int idx = q2arr.front();
+        q2arr.pop();
         if (!is_queued(idx))
             continue;
         if ((int)q0arr.size() < max_procs)
-            q0arr.push_back(idx);
-        else 
-            leftover_q2.push_back(idx);  // Could not promote, keep in q2
+            q0arr.push(idx);
+        else
+        {
+            leftover_q2.push_back(idx);  // Could not promote, keep in q1
+        }
     }
-    
-    q2arr=move(leftover_q2);
+    queue<int> temp2;
+    for (int idx : leftover_q2)
+        temp2.push(idx);
+    q1arr.swap(temp2);
+
+}
+
+inline bool is_queued(int idx) {
+ auto in_queue = [&](queue<int> &q) {
+        queue<int> copy = q;
+        while (!copy.empty()) {
+            if (copy.front() == idx) return true;
+            copy.pop();
+        }
+        return false;
+    };
+
+    return in_queue(q0arr) || in_queue(q1arr) || in_queue(q2arr);
 }
 
 static void place_new_arrivals_mlfq(vector<OnlineProcess> &proc_table,
                                     vector<CmdHistory> &cmd_histories,
-                                    vector<int> &q0arr,
-                                    vector<int> &q1arr,
-                                    vector<int> &q2arr,
+                                    queue<int> &q0arr,
+                                    queue<int> &q1arr,
+                                    queue<int> &q2arr,
                                     int q0_time, int q1_time, int q2_time,
-                                    const function<bool(int)> &is_queued,
-                                    const function<void(int, int)> &push_queue)
+                                    const function<bool(int)> &is_queued)
 {
-    int bibi = 0;
-    for (int i = 0; i < 20; i++)
-    {
-        bibi += i;
-    }
+
 
     (void)q2_time;
 
@@ -463,17 +491,152 @@ static void place_new_arrivals_mlfq(vector<OnlineProcess> &proc_table,
         if (avg > 0.0)
         {
             if ((double)q0_time >= avg)
-                target = 0;
+                q0arr.push(i);
             else if ((double)q1_time >= avg)
-                target = 1;
+                q1arr.push(i);
             else
-                target = 2;
+                q2arr.push(i);
         }
         else
         {
-            target = 1;
+            q1arr.push(i);
+        }
+    }
+}
+
+
+void OnlineScheduler::MultiLevelFeedbackQueue(int quantum0, int quantum1, int quantum2, int boostTime)
+{
+    set_program_start_time();
+    set_stdin_nonblocking(true);
+
+    // queue<int> q0, q1, q2;
+
+    int q[3] = {quantum0, quantum1, quantum2};
+    poll_and_enqueue_new_commands(proc_table, cmd_histories, now_ms());
+    uint64_t last_boost = now_ms();
+
+
+    while (true) {
+        poll_and_enqueue_new_commands(proc_table, cmd_histories, now_ms());
+        place_new_arrivals_mlfq(proc_table, cmd_histories, q0arr, q1arr, q2arr, q[0], q[1], q[2], is_queued);
+
+        uint64_t cur = now_ms();
+
+        // Priority Boost
+        if (boostTime > 0 && (cur - last_boost) >= static_cast<uint64_t>(boostTime)) {
+            promote_all_to_q0(q0arr, q1arr, q2arr, MAX_PROCS, is_queued);
+            last_boost = cur;
+            cout << "Priority boost at " << last_boost << "\n";
         }
 
-        push_queue(target, i);
+        int pick_q = -1;
+        if (!q0arr.empty()) pick_q = 0;
+        else if (!q1arr.empty()) pick_q = 1;
+        else if (!q2arr.empty()) pick_q = 2;
+        else {
+            if (count_if(proc_table.begin(), proc_table.end(), [](const OnlineProcess &p) { return !p.finished; }) == 0) {
+                fd_set rfds;
+                while (count_if(proc_table.begin(), proc_table.end(), [](const OnlineProcess &p) { return !p.finished; }) == 0) {
+                    FD_ZERO(&rfds);
+                    FD_SET(STDIN_FILENO, &rfds);
+                    int sel = select(STDIN_FILENO + 1, &rfds, nullptr, nullptr, nullptr);
+                    if (sel > 0) {
+                        poll_and_enqueue_new_commands(proc_table, cmd_histories, now_ms());
+                        place_new_arrivals_mlfq(proc_table, cmd_histories, q0arr, q1arr, q2arr, q[0], q[1], q[2], is_queued);
+                        break;
+                    } else if (sel == -1 && errno == EINTR) continue;
+                }
+                continue;
+            } else {
+                struct timespec ts{0, POLL_SLEEP_MS * 1000000L};
+                nanosleep(&ts, nullptr);
+                continue;
+            }
+        }
+
+        int proc_idx = -1;
+        if (pick_q == 0 && !q0arr.empty()) { proc_idx = q0arr.front(); q0arr.pop(); }
+        else if (pick_q == 1 && !q1arr.empty()) { proc_idx = q1arr.front(); q1arr.pop(); }
+        else if (pick_q == 2 && !q2arr.empty()) { proc_idx = q2arr.front(); q2arr.pop(); }
+        while (proc_idx >= 0 && proc_table[proc_idx].finished) {
+            if (pick_q == 0 && !q0arr.empty()) { proc_idx = q0arr.front(); q0arr.pop(); }
+            else if (pick_q == 1 && !q1arr.empty()) { proc_idx = q1arr.front(); q1arr.pop(); }
+            else if (pick_q == 2 && !q2arr.empty()) { proc_idx = q2arr.front(); q2arr.pop(); }
+        }
+
+        if (proc_idx < 0) continue;
+        auto &p = proc_table[proc_idx];
+
+        if (p.pid == -1) {
+            spawn_and_stop_child(p);
+            if(p.pid <= 0) {
+                p.finished = true;
+                p.error = true;
+                p.completion_time = now_ms();
+                
+            continue;
+        }
+        }
+
+        uint64_t start = now_ms();
+        if (!p.started) {
+            kill(-p.pid, SIGCONT);
+            p.started = true;
+            p.response_time = start - p.arrival_time;
+        } else {
+            kill(-p.pid, SIGCONT);
+        }
+
+        p.slice_start_ms = start;
+        int slice_len_ms = q[pick_q];
+
+        double est = get_avg_burst_ms(cmd_histories, p.history_index, 3);
+        if (est > 0.0) {
+            double rem_est = est - static_cast<double>(p.total_cpu_time);
+            if (rem_est <= 0.0) slice_len_ms = POLL_SLEEP_MS;
+            else slice_len_ms = std::max(POLL_SLEEP_MS, static_cast<int>(std::min(rem_est, (double)slice_len_ms)));
+        }
+
+        bool finished_in_slice = false;
+        int elapsed = 0;
+
+        while (elapsed < slice_len_ms) {
+            int to_sleep = std::min(slice_len_ms - elapsed, POLL_SLEEP_MS);
+            struct timespec ts{0, to_sleep * 1000000L};
+            nanosleep(&ts, nullptr);
+            elapsed += to_sleep;
+            poll_and_enqueue_new_commands(proc_table, cmd_histories, now_ms());
+
+            int wstatus = 0;
+            int r = check_child_exited(p.pid, &wstatus);
+            if (r > 0 || r == -1) {
+                uint64_t end = now_ms();
+                uint64_t ran = end - start;
+                p.total_cpu_time += ran;
+                p.error = (r == -1);
+                finished_in_slice = true;
+                break;
+            }
+
+            if (pick_q > 0 && ((pick_q == 1 && !q0arr.empty()) || (pick_q == 2 && (!q0arr.empty() || !q1arr.empty()))))
+                break;
+        }
+
+        if (!finished_in_slice) {
+            uint64_t end = now_ms();
+            uint64_t ran = end - start;
+            int wstatus = 0;
+            p.total_cpu_time += ran;
+            kill(-p.pid, SIGSTOP);
+            print_context_switch(p.command, start, end);
+            if (elapsed >= slice_len_ms)
+                (pick_q < 2 ? q1arr : q2arr).push(proc_idx);
+            else
+                (pick_q == 0 ? q0arr : (pick_q == 1 ? q1arr : q2arr)).push(proc_idx);
+        }
     }
+
+    write_results_to_csv(proc_table, "result_online_MLFQ.csv");
+    set_stdin_nonblocking(false);
 }

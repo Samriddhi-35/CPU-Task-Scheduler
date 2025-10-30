@@ -45,8 +45,9 @@ int main() {
     cout << "(Press Ctrl+D or close stdin to stop)\n\n";
 
      OnlineScheduler scheduler;
-    // Run the SJF algorithm with k = 3 (average of last 3 bursts)
+  //  Run the SJF algorithm with k = 3 (average of last 3 bursts)
     scheduler.ShortestJobFirst(3);
+    scheduler.MultiLevelFeedbackQueue(500, 1000, 2000, 4000);
     
     return 0;
 }
