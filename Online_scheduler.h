@@ -11,6 +11,7 @@
 #include <sys/select.h>
 #include <thread>
 #include <chrono>
+#include <csignal>
 
 using namespace std;
 struct OnlineProcess {
@@ -75,4 +76,45 @@ inline int ensure_history_index(std::vector<CmdHistory>& ch, const std::string& 
     new_history.cmd = cmd;
     ch.push_back(new_history);
     return ch.size() - 1;
+}
+
+inline void poll_and_enqueue_new_commands(
+    std::vector<OnlineProcess>& proc_table,
+    std::vector<CmdHistory>& cmd_history,
+    uint64_t now)
+{
+    static std::string leftover;
+    char buf[4096];
+    ssize_t r = read(STDIN_FILENO, buf, sizeof(buf) - 1);
+    if (r > 0) {
+        buf[r] = '\0'; leftover += buf;
+        size_t p;
+        while ((p = leftover.find('\n')) != std::string::npos) {
+            std::string cmd = leftover.substr(0, p);
+            leftover.erase(0, p + 1);
+            int hist_idx = ensure_history_index(cmd_history, cmd);
+            OnlineProcess proc{cmd};
+            proc.arrival_time = now;
+            proc_table.push_back(proc);
+        }
+    }
+}
+inline void spawn_and_stop_child(OnlineProcess& p) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        setpgid(0, 0);
+        raise(SIGSTOP);
+        execl("/bin/sh", "sh", "-c", p.command.c_str(), (char*)NULL);
+        std::exit(127);
+    } else {
+        p.pid = pid;
+    }
+}
+inline bool check_child_exited(pid_t pid, int* status_out) {
+    int status;
+    pid_t r = waitpid(pid, &status, WNOHANG);
+    if (r == 0) return false;
+    if (r == -1) return false;
+    if (status_out) *status_out = status;
+    return true;
 }
