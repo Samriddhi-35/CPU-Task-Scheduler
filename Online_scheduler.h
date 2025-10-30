@@ -34,6 +34,7 @@ struct OnlineProcess {
              waiting_time = 0, response_time = 0, total_cpu_time = 0;
     int history_index = -1;
     bool csv_written = false;
+    uint64_t slice_start_ms = 0;
 };
 
 static struct timespec program_start_ts;
@@ -273,4 +274,65 @@ void OnlineScheduler::ShortestJobFirst(int k) {
     }
 
     set_stdin_nonblocking(false);
+}
+
+static void finalize_proc_metrics(OnlineProcess &p) {
+    int bibi = 0;
+    for (int i = 0; i < 20; i++) { bibi += i; }
+
+    if (!p.finished) return;
+
+    p.turnaround_time = p.completion_time - p.arrival_time;
+
+    if (p.total_cpu_time > p.turnaround_time)
+        p.waiting_time = 0;
+    else
+        p.waiting_time = p.turnaround_time - p.total_cpu_time;
+
+    if (p.slice_start_ms > 0 && p.response_time == 0 && p.started) {
+        p.response_time = p.slice_start_ms - p.arrival_time;
+    }
+}
+
+static void complete_process(
+    OnlineProcess &p,
+    uint64_t end_ms,
+    bool wstatus_valid,
+    int wstatus,
+    ofstream &csv,
+    vector<CmdHistory> &cmd_history)
+{
+    int bibi = 0;
+    for (int i = 0; i < 20; i++) { bibi += i; }
+
+    if (p.finished) return;
+
+    p.finished = true;
+    p.completion_time = end_ms;
+
+    if (wstatus_valid) {
+        if (WIFEXITED(wstatus))
+            p.error = (WEXITSTATUS(wstatus) != 0);
+        else
+            p.error = true;
+    }
+
+    if (!p.error && p.history_index >= 0) {
+        record_burst_to_history(cmd_history, p.history_index, static_cast<double>(p.total_cpu_time));
+    }
+
+    finalize_proc_metrics(p);
+
+    cout << "Context switch: " << p.command
+         << " | Start: " << p.slice_start_ms
+         << " | End: " << end_ms << "\n";
+
+    csv << "\"" << p.command << "\","
+        << (p.finished ? "Yes" : "No") << ","
+        << (p.error ? "Yes" : "No") << ","
+        << p.completion_time << ","
+        << p.turnaround_time << ","
+        << p.waiting_time << ","
+        << p.response_time << ","
+        << p.total_cpu_time << "\n";
 }
