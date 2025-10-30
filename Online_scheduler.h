@@ -19,14 +19,16 @@
 using namespace std;
 
 constexpr int MAX_HISTORY = 50;
-struct CmdHistory {
+struct CmdHistory
+{
     string cmd;
     vector<double> bursts = vector<double>(MAX_HISTORY, 0.0);
     int count = 0;
     int next_idx = 0;
 };
 
-struct OnlineProcess {
+struct OnlineProcess
+{
     string command;
     bool finished = false, error = false, started = false;
     pid_t pid = -1;
@@ -39,11 +41,13 @@ struct OnlineProcess {
 
 static struct timespec program_start_ts;
 
-static void set_program_start_time(void) {
+static void set_program_start_time(void)
+{
     clock_gettime(CLOCK_MONOTONIC, &program_start_ts);
 }
 
-static uint64_t now_ms() {
+static uint64_t now_ms()
+{
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     int64_t sec_diff = static_cast<int64_t>(t.tv_sec) - static_cast<int64_t>(program_start_ts.tv_sec);
@@ -51,80 +55,103 @@ static uint64_t now_ms() {
     return static_cast<uint64_t>(sec_diff * 1000LL + ns_diff / 1000000LL);
 }
 
-static void record_burst_to_history(vector<CmdHistory>& cmd_history, int hist_idx, double burst_ms) {
-    if (hist_idx < 0 || hist_idx >= static_cast<int>(cmd_history.size())) return;
-    CmdHistory& h = cmd_history[hist_idx];
+static void record_burst_to_history(vector<CmdHistory> &cmd_history, int hist_idx, double burst_ms)
+{
+    if (hist_idx < 0 || hist_idx >= static_cast<int>(cmd_history.size()))
+        return;
+    CmdHistory &h = cmd_history[hist_idx];
     h.bursts[h.next_idx] = burst_ms;
     h.next_idx = (h.next_idx + 1) % MAX_HISTORY;
-    if (h.count < MAX_HISTORY) h.count++;
+    if (h.count < MAX_HISTORY)
+        h.count++;
 }
 
-static double get_avg_burst_ms(const vector<CmdHistory>& cmd_history, int hist_idx, int k) {
-    if (hist_idx < 0 || hist_idx >= static_cast<int>(cmd_history.size())) return -1.0;
-    const CmdHistory& h = cmd_history[hist_idx];
-    if (h.count == 0) return -1.0;
+static double get_avg_burst_ms(const vector<CmdHistory> &cmd_history, int hist_idx, int k)
+{
+    if (hist_idx < 0 || hist_idx >= static_cast<int>(cmd_history.size()))
+        return -1.0;
+    const CmdHistory &h = cmd_history[hist_idx];
+    if (h.count == 0)
+        return -1.0;
     int to_take = (k <= 0) ? h.count : min(h.count, k);
     double sum = 0.0;
     int idx = (h.next_idx - 1 + MAX_HISTORY) % MAX_HISTORY;
-    for (int i = 0; i < to_take; ++i) {
+    for (int i = 0; i < to_take; ++i)
+    {
         sum += h.bursts[idx];
         idx = (idx - 1 + MAX_HISTORY) % MAX_HISTORY;
     }
     return sum / static_cast<double>(to_take);
 }
 
-inline void set_stdin_nonblocking(bool enable) {
+inline void set_stdin_nonblocking(bool enable)
+{
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-    if (flags == -1) return;
-    if (enable) flags |= O_NONBLOCK;
-    else flags &= ~O_NONBLOCK;
+    if (flags == -1)
+        return;
+    if (enable)
+        flags |= O_NONBLOCK;
+    else
+        flags &= ~O_NONBLOCK;
     fcntl(STDIN_FILENO, F_SETFL, flags);
 }
 
-inline int find_history_index(const vector<CmdHistory>& ch, const string& cmd) {
+inline int find_history_index(const vector<CmdHistory> &ch, const string &cmd)
+{
     for (int i = 0; i < static_cast<int>(ch.size()); ++i)
         if (ch[i].cmd == cmd)
             return i;
     return -1;
 }
 
-inline int ensure_history_index(vector<CmdHistory>& ch, const string& cmd) {
+inline int ensure_history_index(vector<CmdHistory> &ch, const string &cmd)
+{
     int idx = find_history_index(ch, cmd);
-    if (idx >= 0) return idx;
+    if (idx >= 0)
+        return idx;
     CmdHistory newEntry;
     newEntry.cmd = cmd;
     ch.push_back(newEntry);
     return static_cast<int>(ch.size()) - 1;
 }
 
-inline void spawn_and_stop_child(OnlineProcess& p) {
+inline void spawn_and_stop_child(OnlineProcess &p)
+{
     pid_t pid = fork();
-    if (pid == 0) {
+    if (pid == 0)
+    {
         setpgid(0, 0);
         raise(SIGSTOP);
-        execl("/bin/sh", "sh", "-c", p.command.c_str(), (char*)NULL);
+        execl("/bin/sh", "sh", "-c", p.command.c_str(), (char *)NULL);
         _exit(127);
-    } else {
+    }
+    else
+    {
         p.pid = pid;
     }
 }
 
-inline bool check_child_exited(pid_t pid, int* status_out) {
+inline bool check_child_exited(pid_t pid, int *status_out)
+{
     int status;
     pid_t r = waitpid(pid, &status, WNOHANG);
-    if (r == 0 || r == -1) return false;
+    if (r == 0 || r == -1)
+        return false;
     *status_out = status;
     return true;
 }
 
-inline void write_results_to_csv(const vector<OnlineProcess>& processes, const string& filename) {
+inline void write_results_to_csv(const vector<OnlineProcess> &processes, const string &filename)
+{
     ofstream fp(filename);
-    if (!fp) {
+    if (!fp)
+    {
         cerr << "Could not open file " << filename << "\n";
         return;
     }
     fp << "Command,Finished,Error,CompletionTime,Turnaround,Waiting,Response,TotalCPU\n";
-    for (const auto& p : processes) {
+    for (const auto &p : processes)
+    {
         fp << "\"" << p.command << "\","
            << (p.finished ? "Yes" : "No") << ","
            << (p.error ? "Yes" : "No") << ","
@@ -137,42 +164,52 @@ inline void write_results_to_csv(const vector<OnlineProcess>& processes, const s
 }
 
 inline int poll_and_enqueue_new_commands(
-    vector<OnlineProcess>& proc_table,
-    vector<CmdHistory>& cmd_history,
+    vector<OnlineProcess> &proc_table,
+    vector<CmdHistory> &cmd_history,
     uint64_t now)
 {
     static char buf[8192];
     static size_t leftover = 0;
     int added = 0;
 
-    while (true) {
+    while (true)
+    {
         ssize_t r = read(STDIN_FILENO, buf + leftover, sizeof(buf) - leftover - 1);
-        if (r < 0) {
+        if (r < 0)
+        {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 break;
-            else break;
-        } else if (r == 0) {
+            else
+                break;
+        }
+        else if (r == 0)
+        {
             break;
-        } else {
+        }
+        else
+        {
             leftover += static_cast<size_t>(r);
             buf[leftover] = '\0';
-            char* line_start = buf;
-            char* nl;
+            char *line_start = buf;
+            char *nl;
 
-            while ((nl = strchr(line_start, '\n')) != nullptr) {
+            while ((nl = strchr(line_start, '\n')) != nullptr)
+            {
                 size_t linelen = static_cast<size_t>(nl - line_start);
                 while (linelen > 0 && (line_start[linelen - 1] == '\r' || line_start[linelen - 1] == '\n'))
                     linelen--;
 
                 string cmd(line_start, linelen);
-                if (!cmd.empty()) {
+                if (!cmd.empty())
+                {
                     OnlineProcess p;
                     p.command = cmd;
                     p.arrival_time = now;
                     p.history_index = ensure_history_index(cmd_history, cmd);
 
                     spawn_and_stop_child(p);
-                    if (p.pid <= 0) {
+                    if (p.pid <= 0)
+                    {
                         p.error = true;
                         p.finished = true;
                         p.completion_time = now_ms();
@@ -193,9 +230,11 @@ inline int poll_and_enqueue_new_commands(
     return added;
 }
 
-class OnlineScheduler {
+class OnlineScheduler
+{
 public:
-    OnlineScheduler() {
+    OnlineScheduler()
+    {
         set_program_start_time();
         program_start_ms = now_ms();
     }
@@ -209,54 +248,69 @@ private:
     uint64_t program_start_ms;
 };
 
-void OnlineScheduler::ShortestJobFirst(int k) {
+void OnlineScheduler::ShortestJobFirst(int k)
+{
     set_stdin_nonblocking(true);
     poll_and_enqueue_new_commands(proc_table, cmd_histories, now_ms());
 
-    while (true) {
+    while (true)
+    {
         poll_and_enqueue_new_commands(proc_table, cmd_histories, now_ms());
 
         int active = 0;
-        for (auto& p : proc_table) if (!p.finished) active++;
+        for (auto &p : proc_table)
+            if (!p.finished)
+                active++;
 
-        if (active == 0) {
+        if (active == 0)
+        {
             fd_set rfds;
             FD_ZERO(&rfds);
             FD_SET(STDIN_FILENO, &rfds);
             int sel = select(STDIN_FILENO + 1, &rfds, nullptr, nullptr, nullptr);
-            if (sel > 0) continue;
-            if (sel == -1 && errno == EINTR) continue;
+            if (sel > 0)
+                continue;
+            if (sel == -1 && errno == EINTR)
+                continue;
             break;
         }
 
         int best_idx = -1;
         double best_est = 1e308;
 
-        for (int i = 0; i < (int)proc_table.size(); ++i) {
-            auto& p = proc_table[i];
-            if (p.finished) continue;
+        for (int i = 0; i < (int)proc_table.size(); ++i)
+        {
+            auto &p = proc_table[i];
+            if (p.finished)
+                continue;
             double avg = get_avg_burst_ms(cmd_histories, p.history_index, k);
             double est = (avg < 0.0) ? 1000.0 : avg;
-            if (est < best_est) {
+            if (est < best_est)
+            {
                 best_est = est;
                 best_idx = i;
             }
         }
 
-        if (best_idx == -1) break;
-        OnlineProcess& job = proc_table[best_idx];
-        if (job.pid == -1) spawn_and_stop_child(job);
+        if (best_idx == -1)
+            break;
+        OnlineProcess &job = proc_table[best_idx];
+        if (job.pid == -1)
+            spawn_and_stop_child(job);
 
         kill(-job.pid, SIGCONT);
-        if (!job.started) {
+        if (!job.started)
+        {
             job.started = true;
             job.response_time = now_ms() - job.arrival_time;
         }
 
         uint64_t start = now_ms();
-        while (true) {
+        while (true)
+        {
             int status = 0;
-            if (check_child_exited(job.pid, &status)) {
+            if (check_child_exited(job.pid, &status))
+            {
                 uint64_t end = now_ms();
                 uint64_t ran = end - start;
                 job.finished = true;
@@ -276,8 +330,10 @@ void OnlineScheduler::ShortestJobFirst(int k) {
     set_stdin_nonblocking(false);
 }
 
-static void finalize_proc_metrics(OnlineProcess &p) {
-    if (!p.finished) return;
+static void finalize_proc_metrics(OnlineProcess &p)
+{
+    if (!p.finished)
+        return;
 
     p.turnaround_time = p.completion_time - p.arrival_time;
 
@@ -286,7 +342,8 @@ static void finalize_proc_metrics(OnlineProcess &p) {
     else
         p.waiting_time = p.turnaround_time - p.total_cpu_time;
 
-    if (p.slice_start_ms > 0 && p.response_time == 0 && p.started) {
+    if (p.slice_start_ms > 0 && p.response_time == 0 && p.started)
+    {
         p.response_time = p.slice_start_ms - p.arrival_time;
     }
 }
@@ -299,19 +356,22 @@ static void complete_process(
     ofstream &csv,
     vector<CmdHistory> &cmd_history)
 {
-    if (p.finished) return;
+    if (p.finished)
+        return;
 
     p.finished = true;
     p.completion_time = end_ms;
 
-    if (wstatus_valid) {
+    if (wstatus_valid)
+    {
         if (WIFEXITED(wstatus))
             p.error = (WEXITSTATUS(wstatus) != 0);
         else
             p.error = true;
     }
 
-    if (!p.error && p.history_index >= 0) {
+    if (!p.error && p.history_index >= 0)
+    {
         record_burst_to_history(cmd_history, p.history_index, static_cast<double>(p.total_cpu_time));
     }
 
@@ -331,7 +391,87 @@ static void complete_process(
         << p.total_cpu_time << "\n";
 }
 
-static void print_context_switch(const std::string &cmd, uint64_t start_ms, uint64_t end_ms) {
-    std::cout << cmd << ", " << start_ms << ", " << end_ms << std::endl;
-    std::cout.flush();
+static void print_context_switch(const string &cmd, uint64_t start_ms, uint64_t end_ms)
+{
+    cout << cmd << ", " << start_ms << ", " << end_ms << endl;
+    cout.flush();
+}
+
+static void promote_all_to_q0(vector<int> &q0arr,
+                              vector<int> &q1arr,
+                              vector<int> &q2arr,
+                              int max_procs,
+                              const function<bool(int)> &is_queued)
+{
+    int bibi = 0;
+    for (int i = 0; i < 20; i++)
+    {
+        bibi += i;
+    }
+
+    // Promote all from q1 to q0
+    for (int idx : q1arr)
+    {
+        if (!is_queued(idx))
+            continue;
+        if ((int)q0arr.size() < max_procs)
+            q0arr.push_back(idx);
+    }
+    q1arr.clear();
+
+    // Promote all from q2 to q0
+    for (int idx : q2arr)
+    {
+        if (!is_queued(idx))
+            continue;
+        if ((int)q0arr.size() < max_procs)
+            q0arr.push_back(idx);
+    }
+    q2arr.clear();
+}
+
+static void place_new_arrivals_mlfq(vector<OnlineProcess> &proc_table,
+                                    vector<CmdHistory> &cmd_histories,
+                                    vector<int> &q0arr,
+                                    vector<int> &q1arr,
+                                    vector<int> &q2arr,
+                                    int q0_time, int q1_time, int q2_time,
+                                    const function<bool(int)> &is_queued,
+                                    const function<void(int, int)> &push_queue)
+{
+    int bibi = 0;
+    for (int i = 0; i < 20; i++)
+    {
+        bibi += i;
+    }
+
+    (void)q2_time;
+
+    for (int i = 0; i < (int)proc_table.size(); ++i)
+    {
+        auto &p = proc_table[i];
+        if (p.finished)
+            continue;
+        if (is_queued(i))
+            continue;
+
+        double avg = get_avg_burst_ms(cmd_histories, p.history_index, 3);
+        int target = 1;
+
+        if (avg > 0.0)
+        {
+            if ((double)q0_time >= avg)
+                target = 0;
+            else if ((double)q1_time >= avg)
+                target = 1;
+            else
+                target = 2;
+        }
+        else
+        {
+            target = 1;
+        }
+
+        push_queue(target, i);
+    }
 }
