@@ -277,9 +277,6 @@ void OnlineScheduler::ShortestJobFirst(int k) {
 }
 
 static void finalize_proc_metrics(OnlineProcess &p) {
-    int bibi = 0;
-    for (int i = 0; i < 20; i++) { bibi += i; }
-
     if (!p.finished) return;
 
     p.turnaround_time = p.completion_time - p.arrival_time;
@@ -302,9 +299,6 @@ static void complete_process(
     ofstream &csv,
     vector<CmdHistory> &cmd_history)
 {
-    int bibi = 0;
-    for (int i = 0; i < 20; i++) { bibi += i; }
-
     if (p.finished) return;
 
     p.finished = true;
@@ -335,4 +329,9 @@ static void complete_process(
         << p.waiting_time << ","
         << p.response_time << ","
         << p.total_cpu_time << "\n";
+}
+
+static void print_context_switch(const std::string &cmd, uint64_t start_ms, uint64_t end_ms) {
+    std::cout << cmd << ", " << start_ms << ", " << end_ms << std::endl;
+    std::cout.flush();
 }
