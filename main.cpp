@@ -1,7 +1,12 @@
 #include "Offline_scheduler.h"
+#include "Online_scheduler.h"
 #include <vector>
 #include <string>
 #include <iostream>
+#include <thread>
+#include <chrono>
+#include <csignal>
+#include <unistd.h>
 using namespace std;
 
 void reset_process_state(std::vector<Process> &processes) {
@@ -32,6 +37,16 @@ int main() {
 
     reset_process_state(processes);
     MultiLevelFeedbackQueue(processes, 500, 1000, 2000, 4000);
-    cout << "All scheduling algorithms executed.\n";
+    cout << "All Offline scheduling algorithms executed.\n";
+   
+    cout << "=== Online Shortest Job First (SJF) Test ===\n";
+    cout << "Enter shell commands (one per line). Example:\n";
+    cout << "  sleep 1\n  echo Hello\n  ls -l\n";
+    cout << "(Press Ctrl+D or close stdin to stop)\n\n";
+
+     OnlineScheduler scheduler;
+    // Run the SJF algorithm with k = 3 (average of last 3 bursts)
+    scheduler.ShortestJobFirst(3);
+    
     return 0;
 }
