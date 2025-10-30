@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <iostream>
 #include <unistd.h>
+#include <fstream>
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <sys/select.h>
@@ -22,9 +23,9 @@ struct OnlineProcess {
 };
 
 inline uint64_t now_ms() {
-    static auto program_start = std::chrono::steady_clock::now();
-    auto now = std::chrono::steady_clock::now();
-    return std::chrono::duration_cast<std::chrono::milliseconds>(now - program_start).count();
+    static auto program_start = chrono::steady_clock::now();
+    auto now = chrono::steady_clock::now();
+    return chrono::duration_cast<chrono::milliseconds>(now - program_start).count();
 }
 
 class OnlineScheduler {
@@ -65,11 +66,11 @@ inline void set_stdin_nonblocking(bool enable) {
     fcntl(STDIN_FILENO, F_SETFL, flags);
 }
 
-inline int find_history_index(const std::vector<CmdHistory>& ch, const std::string& cmd) {
+inline int find_history_index(const vector<CmdHistory>& ch, const string& cmd) {
     for (int i = 0; i < (int)ch.size(); ++i) if (ch[i].cmd == cmd) return i;
     return -1;
 }
-inline int ensure_history_index(std::vector<CmdHistory>& ch, const std::string& cmd) {
+inline int ensure_history_index(vector<CmdHistory>& ch, const string& cmd) {
     int idx = find_history_index(ch, cmd);
     if (idx >= 0) return idx;
     CmdHistory new_history;
@@ -79,18 +80,18 @@ inline int ensure_history_index(std::vector<CmdHistory>& ch, const std::string& 
 }
 
 inline void poll_and_enqueue_new_commands(
-    std::vector<OnlineProcess>& proc_table,
-    std::vector<CmdHistory>& cmd_history,
+    vector<OnlineProcess>& proc_table,
+    vector<CmdHistory>& cmd_history,
     uint64_t now)
 {
-    static std::string leftover;
+    static string leftover;
     char buf[4096];
     ssize_t r = read(STDIN_FILENO, buf, sizeof(buf) - 1);
     if (r > 0) {
         buf[r] = '\0'; leftover += buf;
         size_t p;
-        while ((p = leftover.find('\n')) != std::string::npos) {
-            std::string cmd = leftover.substr(0, p);
+        while ((p = leftover.find('\n')) != string::npos) {
+            string cmd = leftover.substr(0, p);
             leftover.erase(0, p + 1);
             int hist_idx = ensure_history_index(cmd_history, cmd);
             OnlineProcess proc{cmd};
@@ -105,7 +106,7 @@ inline void spawn_and_stop_child(OnlineProcess& p) {
         setpgid(0, 0);
         raise(SIGSTOP);
         execl("/bin/sh", "sh", "-c", p.command.c_str(), (char*)NULL);
-        std::exit(127);
+        exit(127);
     } else {
         p.pid = pid;
     }
@@ -117,4 +118,45 @@ inline bool check_child_exited(pid_t pid, int* status_out) {
     if (r == -1) return false;
     if (status_out) *status_out = status;
     return true;
+}
+inline void ShortestJobFirst(int k) {
+    vector<OnlineProcess> proc_table;
+    vector<CmdHistory> cmd_history;
+    set_stdin_nonblocking(true);
+    ofstream csv("result_online_SJF.csv");
+    poll_and_enqueue_new_commands(proc_table, cmd_history, now_ms());
+
+    while (true) {
+        poll_and_enqueue_new_commands(proc_table, cmd_history, now_ms());
+        int active = 0; for (auto& p : proc_table) if (!p.finished) ++active;
+        if (active == 0) break;
+        int idx = -1;
+        for (int i = 0; i < (int)proc_table.size(); ++i)
+            if (!proc_table[i].finished) { idx = i; break; }
+        if (idx == -1) continue;
+        auto& job = proc_table[idx];
+        if (job.pid == -1) spawn_and_stop_child(job);
+        kill(-job.pid, SIGCONT); job.started = true;
+        uint64_t start = now_ms();
+        job.response_time = start - job.arrival_time;
+        while (true) {
+            int wstatus = 0;
+            if (check_child_exited(job.pid, &wstatus)) {
+                uint64_t end = now_ms();
+                job.finished = true; job.completion_time = end;
+                job.total_cpu_time += end - start;
+                // Write CSV
+                csv << '"' << job.command << "\",Yes," << (job.error ? "Yes" : "No") << "," 
+                    << job.completion_time << "," << (job.completion_time-job.arrival_time) << ","
+                    << (job.completion_time-job.arrival_time-job.total_cpu_time) << "," 
+                    << job.response_time << "\n";
+                csv.flush();
+                break;
+            }
+            this_thread::sleep_for(chrono::milliseconds(20));
+        }
+    }
+
+    csv.close();
+    set_stdin_nonblocking(false);
 }
