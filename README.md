@@ -1,20 +1,71 @@
 # CPU Scheduling Simulator in C++
-This repository contains implementations of CPU scheduling algorithms in C++, aimed for educational and interview practice purposes. It supports both offline and online scheduling algorithms with modular C++ code.
+
+This repository features a comprehensive simulator for CPU scheduling algorithms implemented in modern C++17.  
+It is designed for educational purposes, interview preparation, and in-depth understanding of operating system scheduling techniques.
+
 ---
 
 ## Features
 
-### Offline Schedulers
-- First-Come-First-Serve (FCFS)
-- Round Robin (RR)
-- Multi-Level Feedback Queue (MLFQ)
+### Offline Scheduling Algorithms
+- First-Come-First-Serve (FCFS)  
+- Round Robin (RR)  
+- Multi-Level Feedback Queue (MLFQ)  
 
-Offline schedulers simulate a fixed list of processes scheduled in different ways.
+Offline schedulers simulate fixed process lists for deterministic analysis and testing.
 
-### Online Schedulers
-- Shortest Job First (SJF) with burst history prediction
-- Multi-Level Feedback Queue (MLFQ) with dynamic job arrivals via non-blocking input
+### Online Scheduling Algorithms
+- Shortest Job First (SJF) with burst history prediction  
+- Multi-Level Feedback Queue (MLFQ) with dynamic job arrivals and priority boosting  
 
-Online schedulers simulate realistic system environments where processes arrive at runtime.
+Online schedulers mimic real-time systems with processes arriving during execution.
 
 ---
+
+## Usage
+
+### Running the Simulator
+
+Clone the repository and simply run: ./main (main.cpp)
+
+
+* No explicit build steps required if using modern IDE setups or `g++ main.cpp -std=c++17 -o main` manually.
+
+### Interactive Testing
+
+- For online schedulers, enter shell commands line by line (e.g., `sleep 1`, `ls`, `echo Hello`).
+- Terminate input by pressing `Ctrl+D` to signal end of commands.
+- Results are saved in CSV files (e.g., `result_online_SJF.csv`, `result_online_MLFQ.csv`) for analysis.
+
+---
+
+## Design Highlights
+
+- Modular, header-only C++17 implementations for ease of integration.
+- Uses POSIX system calls (`fork`, `waitpid`, `kill`) for realistic process simulation.
+- Adaptive burst time prediction enhances Shortest Job First scheduling.
+- Multi-Level Feedback Queue scheduler with priority boost and aging.
+- Real-time command polling via non-blocking stdin.
+- Detailed metrics and CSV output for performance benchmarking.
+
+---
+
+## Skills Demonstrated
+
+- Operating Systems fundamentals (process scheduling, signals)  
+- Modern C++ programming with STL 
+- Real-time and adaptive scheduling strategies  
+- Performance analysis and benchmarking with logging and CSV exports  
+
+---
+
+## Contribution
+
+Contributions welcome! Opening pull requests for new schedulers, bug fixes, or feature improvements is encouraged.
+
+---
+
+
+
+
+
