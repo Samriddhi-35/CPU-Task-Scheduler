@@ -403,31 +403,33 @@ static void promote_all_to_q0(vector<int> &q0arr,
                               int max_procs,
                               const function<bool(int)> &is_queued)
 {
-    int bibi = 0;
-    for (int i = 0; i < 20; i++)
-    {
-        bibi += i;
-    }
-
-    // Promote all from q1 to q0
+    vector<int> leftover_q1;
     for (int idx : q1arr)
     {
         if (!is_queued(idx))
             continue;
         if ((int)q0arr.size() < max_procs)
             q0arr.push_back(idx);
+         else
+    {
+        leftover_q1.push_back(idx);  // Could not promote, keep in q1
     }
-    q1arr.clear();
+    }
+    q1arr =move(leftover_q1);
 
     // Promote all from q2 to q0
+    vector<int> leftover_q2;
     for (int idx : q2arr)
     {
         if (!is_queued(idx))
             continue;
         if ((int)q0arr.size() < max_procs)
             q0arr.push_back(idx);
+        else 
+            leftover_q2.push_back(idx);  // Could not promote, keep in q2
     }
-    q2arr.clear();
+    
+    q2arr=move(leftover_q2);
 }
 
 static void place_new_arrivals_mlfq(vector<OnlineProcess> &proc_table,
